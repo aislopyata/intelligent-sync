@@ -157,6 +157,7 @@ export default class IntelligentSyncPlugin extends Plugin {
         port: this.settings.bindPort,
         certPath: this.settings.tlsCertPath,
         keyPath: this.settings.tlsKeyPath,
+        tlsEnabled: this.settings.tlsEnabled,
       }),
       pluginAbs
     );

@@ -10,6 +10,8 @@ export interface IntelligentSyncSettings {
   /** Absolute paths to TLS material (server). Empty = auto self-signed. */
   tlsCertPath: string;
   tlsKeyPath: string;
+  /** Disable TLS so a reverse proxy (nginx) terminates HTTPS. */
+  tlsEnabled: boolean;
   /** Client: full base URL, e.g. https://10.0.0.2:27183 */
   serverUrl: string;
   pollIntervalSec: number;
@@ -29,6 +31,7 @@ export const DEFAULT_SETTINGS: IntelligentSyncSettings = {
   apiKey: "",
   tlsCertPath: "",
   tlsKeyPath: "",
+  tlsEnabled: true,
   serverUrl: "https://127.0.0.1:27183",
   pollIntervalSec: 30,
   syncOnSave: true,
