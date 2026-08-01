@@ -1,6 +1,6 @@
 {
   "name": "intelligent-sync",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Server/client markdown sync for Obsidian with revision log, API key, and TLS",
   "main": "main.js",
   "scripts": {

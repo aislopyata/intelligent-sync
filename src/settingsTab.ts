@@ -129,6 +129,19 @@ export class IntelligentSyncSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("TLS / HTTPS")
+      .setDesc(
+        "Enable this when the server is reached directly over HTTPS by clients. Disable only behind a TLS-terminating reverse proxy (nginx) listening on 443."
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.tlsEnabled).onChange(async (value) => {
+          this.plugin.settings.tlsEnabled = value;
+          await this.plugin.saveSettings();
+          this.display();
+        })
+      );
+
+    new Setting(containerEl)
       .setName("Auto-start server")
       .setDesc("Start the HTTPS server when Obsidian loads.")
       .addToggle((toggle) =>

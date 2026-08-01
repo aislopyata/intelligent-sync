@@ -37,15 +37,13 @@ cp main.js manifest.json styles.css "$PLUGIN/"
 
 3. Enable **Intelligent Sync** under Settings → Community plugins.
 
-If you previously installed this plugin under `obsidian-intelligent-sync`, remove that folder and use `intelligent-sync` instead.
-
 ### Community plugins
 
 After the plugin is listed in the directory, install it from Settings → Community plugins → Browse → **Intelligent Sync**.
 
 ## Quick start
 
-### Server (Linux desktop)
+### Server (Linux desktop, direct HTTPS)
 
 1. Open the vault that should be canonical.
 2. Settings → Intelligent Sync → Mode: **Server**.
@@ -58,10 +56,45 @@ After the plugin is listed in the directory, install it from Settings → Commun
 
 Expose the port through WireGuard or a public address. The plugin always speaks HTTPS.
 
+### Server behind a TLS-terminating reverse proxy (nginx)
+
+Use this so iPhone clients connect to a trusted certificate while the plugin serves plain HTTP on the laptop.
+
+1. Open the canonical vault and set Mode **Server**.
+2. Bind host: `127.0.0.1`, Bind port: `27183`.
+3. Toggle **TLS / HTTPS** **off**.
+4. Start the server.
+5. On the VPS, point nginx at the laptop’s port 27183 (reachable via WireGuard or a reverse SSH tunnel — see below).
+
+```nginx
+upstream intelligent_sync_obsidian { server 127.0.0.1:27183; }
+
+server {
+    listen 443 ssl http2;
+    server_name sync.your-domain.com;
+
+    ssl_certificate     /etc/letsencrypt/live/sync.your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sync.your-domain.com/privkey.pem;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    location / {
+        proxy_pass http://intelligent_sync_obsidian;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+```
+
+Making the laptop’s 27183 reachable from the VPS:
+- **WireGuard**: laptop is the server (`10.0.0.1:27183`, firewall open), VPS is a peer (`10.0.0.2`), nginx upstream → `10.0.0.1:27183`.
+- **Reverse SSH tunnel** (no router fiddling): from the laptop run `ssh -N -R 27183:127.0.0.1:27183 user@vps`, then nginx upstream stays `127.0.0.1:27183`.
+
 ### Client (Linux or iPhone)
 
 1. Mode: **Client**.
-2. Server URL: `https://<host>:27183`.
+2. Server URL: `https://<host>:27183` (direct) or `https://sync.your-domain.com` (reverse proxy, no port).
 3. Paste the same API key.
 4. Enable sync on save and/or set a poll interval.
 5. Run **Sync now**.
@@ -70,9 +103,10 @@ On iPhone, sync runs while Obsidian is open (open / save / poll). Background syn
 
 ## iPhone and TLS
 
-iOS often rejects self-signed certificates used by `fetch`. For mobile clients use a publicly trusted certificate or install your own CA on the device.
+iOS often rejects self-signed certificates used by `fetch`. For mobile clients use a publicly trusted certificate (e.g. Let’s Encrypt behind nginx) or install your own CA on the device.
 
-WireGuard encrypts the network path; this plugin still requires HTTPS and an API key.
+WireGuard encrypts the network path; with a reverse proxy the public endpoint serves a trusted certificate while the plugin-to-nginx link is plain HTTP over loopback or a tunnel.
+
 
 ## Security notes
 

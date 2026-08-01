@@ -2,6 +2,7 @@ import type { App } from "obsidian";
 import { Platform, TFile } from "obsidian";
 import type { IncomingMessage, ServerResponse } from "http";
 import type { Server as HttpsServerType } from "https";
+import type { Server as HttpServerType } from "http";
 import {
   API_PREFIX,
   FileResponse,
@@ -52,13 +53,20 @@ function parseUrl(req: IncomingMessage): URL {
 }
 
 export class SyncHttpsServer {
-  private server: HttpsServerType | null = null;
+  private server: HttpServerType | HttpsServerType | null = null;
+  private tlsEnabled: boolean;
 
   constructor(
     private app: App,
     private store: RevisionStore,
     private getApiKey: () => string,
-    private getBind: () => { host: string; port: number; certPath: string; keyPath: string },
+    private getBind: () => {
+      host: string;
+      port: number;
+      certPath: string;
+      keyPath: string;
+      tlsEnabled: boolean;
+    },
     private pluginDirAbsolute: string
   ) {}
 
@@ -69,20 +77,28 @@ export class SyncHttpsServer {
   async start(): Promise<{ host: string; port: number }> {
     if (this.server) return this.getBind();
 
-    const https = nodeRequire<typeof import("https")>("https");
     const bind = this.getBind();
-    const tls = await loadOrCreateTls({
-      certPath: bind.certPath,
-      keyPath: bind.keyPath,
-      pluginDirAbsolute: this.pluginDirAbsolute,
-    });
+    this.tlsEnabled = bind.tlsEnabled;
 
-    this.server = https.createServer(
-      { cert: tls.cert, key: tls.key },
-      (req, res) => {
+    if (this.tlsEnabled) {
+      const https = nodeRequire<typeof import("https")>("https");
+      const tls = await loadOrCreateTls({
+        certPath: bind.certPath,
+        keyPath: bind.keyPath,
+        pluginDirAbsolute: this.pluginDirAbsolute,
+      });
+      this.server = https.createServer(
+        { cert: tls.cert, key: tls.key },
+        (req, res) => {
+          void this.handle(req, res);
+        }
+      );
+    } else {
+      const http = nodeRequire<typeof import("http")>("http");
+      this.server = http.createServer((req, res) => {
         void this.handle(req, res);
-      }
-    );
+      });
+    }
 
     await new Promise<void>((resolve, reject) => {
       this.server!.once("error", reject);
