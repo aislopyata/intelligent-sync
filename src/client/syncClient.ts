@@ -1,3 +1,4 @@
+import { requestUrl } from "obsidian";
 import {
   API_PREFIX,
   ChangesResponse,
@@ -27,22 +28,24 @@ export class SyncApiClient {
 
   private async request<T>(
     path: string,
-    init?: RequestInit & { query?: Record<string, string> }
+    init?: { method?: string; body?: string; query?: Record<string, string> }
   ): Promise<T> {
     const { query, ...rest } = init ?? {};
-    const res = await fetch(this.url(path, query), {
-      ...rest,
+    const response = await requestUrl({
+      url: this.url(path, query),
+      method: rest.method ?? "GET",
+      contentType: "application/json",
+      body: rest.body,
       headers: {
         Authorization: `Bearer ${this.getApiKey()}`,
-        "Content-Type": "application/json",
-        ...(rest.headers ?? {}),
       },
+      throw: false,
     });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+    if (response.status < 200 || response.status >= 300) {
+      const text = response.text || String(response.status);
+      throw new Error(`HTTP ${response.status}: ${text}`);
     }
-    return (await res.json()) as T;
+    return response.json as T;
   }
 
   status(): Promise<StatusResponse> {
