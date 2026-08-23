@@ -1,6 +1,6 @@
 {
   "name": "intelligent-sync",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Server/client markdown sync for Obsidian with revision log, API key, and TLS",
   "main": "main.js",
   "scripts": {
@@ -8,7 +8,10 @@
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
-  "keywords": ["obsidian", "sync"],
+  "keywords": [
+    "obsidian",
+    "sync"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.11.0",
