@@ -17,6 +17,11 @@ export interface PullPushResult {
   error?: string;
 }
 
+function summarizeIssues(issues: string[]): string {
+  const msg = issues.join("; ");
+  return msg.length > 280 ? `${msg.slice(0, 277)}...` : msg;
+}
+
 export class PullPushEngine {
   applyingRemote = false;
 
@@ -29,6 +34,7 @@ export class PullPushEngine {
 
   async sync(): Promise<PullPushResult> {
     const settings = this.getSettings();
+    const issues: string[] = [];
     try {
       const status = await this.client.status();
       let pulled = 0;
@@ -39,27 +45,40 @@ export class PullPushEngine {
       if (status.revision > settings.clientRevision) {
         const { changes } = await this.client.changes(settings.clientRevision);
         this.applyingRemote = true;
+        let pullFailed = false;
         try {
           if (changes.length === 0) {
             const index = await this.client.index();
             for (const entry of index.files) {
-              if (entry.deleted) {
-                await this.applyServerFile(entry.path, {
-                  content: "",
-                  deleted: true,
-                  contentHash: "",
-                });
-                delete settings.clientFileHashes[entry.path];
-              } else {
-                await this.applyRemoteChange(entry.path, "upsert");
-                settings.clientFileHashes[entry.path] = entry.contentHash;
-                pulled += 1;
+              try {
+                if (entry.deleted) {
+                  await this.applyServerFile(entry.path, {
+                    content: "",
+                    deleted: true,
+                    contentHash: "",
+                  });
+                  delete settings.clientFileHashes[entry.path];
+                } else {
+                  await this.applyRemoteChange(entry.path, "upsert");
+                  settings.clientFileHashes[entry.path] = entry.contentHash;
+                  pulled += 1;
+                }
+              } catch (err) {
+                issues.push(`${entry.path}: ${String(err)}`);
+                pullFailed = true;
+                break;
               }
             }
-            settings.clientRevision = index.revision;
+            if (!pullFailed) settings.clientRevision = index.revision;
           } else {
             for (const change of changes) {
-              await this.applyRemoteChange(change.path, change.op);
+              try {
+                await this.applyRemoteChange(change.path, change.op);
+              } catch (err) {
+                issues.push(`${change.path}: ${String(err)}`);
+                pullFailed = true;
+                break;
+              }
               pulled += 1;
               settings.clientRevision = Math.max(settings.clientRevision, change.revision);
               if (change.op === "upsert") {
@@ -68,7 +87,9 @@ export class PullPushEngine {
                 delete settings.clientFileHashes[change.path];
               }
             }
-            settings.clientRevision = Math.max(settings.clientRevision, status.revision);
+            if (!pullFailed) {
+              settings.clientRevision = Math.max(settings.clientRevision, status.revision);
+            }
           }
         } finally {
           this.applyingRemote = false;
@@ -77,29 +98,35 @@ export class PullPushEngine {
       }
 
       // 2) Push local divergences
-      const localChanges = await this.collectLocalChanges();
+      const localChanges = await this.collectLocalChanges(issues);
       if (localChanges.length > 0) {
-        const pushRes = await this.client.push({
-          baseRevision: settings.clientRevision,
-          changes: localChanges,
-        });
-
-        for (const acc of pushRes.accepted) {
-          pushed += 1;
-          settings.clientRevision = Math.max(settings.clientRevision, acc.revision);
-          if (acc.op === "delete") {
-            delete settings.clientFileHashes[acc.path];
-          } else {
-            settings.clientFileHashes[acc.path] = acc.contentHash;
-          }
-        }
-
-        this.applyingRemote = true;
         try {
-          for (const rej of pushRes.rejected) {
-            rejected += 1;
-            if (rej.server) {
-              await this.applyServerFile(rej.server.path, rej.server);
+          const pushRes = await this.client.push({
+            baseRevision: settings.clientRevision,
+            changes: localChanges,
+          });
+
+          for (const acc of pushRes.accepted) {
+            pushed += 1;
+            settings.clientRevision = Math.max(settings.clientRevision, acc.revision);
+            if (acc.op === "delete") {
+              delete settings.clientFileHashes[acc.path];
+            } else {
+              settings.clientFileHashes[acc.path] = acc.contentHash;
+            }
+          }
+
+          this.applyingRemote = true;
+          try {
+            for (const rej of pushRes.rejected) {
+              rejected += 1;
+              if (!rej.server) continue;
+              try {
+                await this.applyServerFile(rej.server.path, rej.server);
+              } catch (err) {
+                issues.push(`${rej.server.path}: ${String(err)}`);
+                continue;
+              }
               if (rej.server.deleted) {
                 delete settings.clientFileHashes[rej.server.path];
               } else {
@@ -110,28 +137,35 @@ export class PullPushEngine {
                 );
               }
             }
+          } finally {
+            this.applyingRemote = false;
           }
-        } finally {
-          this.applyingRemote = false;
-        }
 
-        settings.clientRevision = Math.max(settings.clientRevision, pushRes.revision);
+          settings.clientRevision = Math.max(settings.clientRevision, pushRes.revision);
+
+          if (rejected > 0) {
+            new Notice(
+              `Intelligent Sync: ${rejected} change(s) rejected (server wins)`
+            );
+          }
+        } catch (err) {
+          issues.push(`push: ${String(err)}`);
+        }
         await this.saveSettings();
-
-        if (rejected > 0) {
-          new Notice(
-            `Intelligent Sync: ${rejected} change(s) rejected (server wins)`
-          );
-        }
       }
 
-      return {
+      const result: PullPushResult = {
         revision: settings.clientRevision,
         pulled,
         pushed,
         rejected,
         online: true,
       };
+      if (issues.length > 0) {
+        result.error = summarizeIssues(issues);
+        new Notice(`Intelligent Sync: synced with ${issues.length} issue(s), see status bar`);
+      }
+      return result;
     } catch (err) {
       return {
         revision: settings.clientRevision,
@@ -182,7 +216,7 @@ export class PullPushEngine {
     }
   }
 
-  private async collectLocalChanges(): Promise<PushChange[]> {
+  private async collectLocalChanges(into: string[]): Promise<PushChange[]> {
     const settings = this.getSettings();
     const changes: PushChange[] = [];
     const seen = new Set<string>();
@@ -191,8 +225,15 @@ export class PullPushEngine {
       const path = normalizeVaultPath(file.path);
       if (!isMarkdownPath(path)) continue;
       seen.add(path);
-      const content = await this.app.vault.read(file);
-      const hash = await hashContent(content);
+      let content: string;
+      let hash: string;
+      try {
+        content = await this.app.vault.read(file);
+        hash = await hashContent(content);
+      } catch (err) {
+        into.push(`${path}: ${String(err)}`);
+        continue;
+      }
       const known = settings.clientFileHashes[path] ?? "";
       if (hash !== known) {
         changes.push({

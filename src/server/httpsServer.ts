@@ -186,7 +186,15 @@ export class SyncHttpsServer {
         }
         const file = this.app.vault.getAbstractFileByPath(filePath);
         if (!(file instanceof TFile)) {
-          sendJson(res, 404, { error: "file not found" });
+          const body: FileResponse = {
+            path: filePath,
+            revision: meta.revision,
+            contentHash: "",
+            mtime: meta.mtime,
+            content: "",
+            deleted: true,
+          };
+          sendJson(res, 200, body);
           return;
         }
         const content = await this.app.vault.read(file);
@@ -203,7 +211,20 @@ export class SyncHttpsServer {
 
       if (method === "POST" && path === `${API_PREFIX}/push`) {
         const raw = await readBody(req);
-        const payload = JSON.parse(raw) as PushRequest;
+        let payload: PushRequest;
+        try {
+          payload = JSON.parse(raw) as PushRequest;
+        } catch {
+          sendJson(res, 400, { error: "invalid json body" });
+          return;
+        }
+        if (!payload || typeof payload !== "object") {
+          sendJson(res, 400, { error: "invalid payload" });
+          return;
+        }
+        if (!Array.isArray(payload.changes)) {
+          payload.changes = [];
+        }
         const response = await this.handlePush(payload);
         sendJson(res, 200, response);
         return;
@@ -221,6 +242,9 @@ export class SyncHttpsServer {
     const mtime = Date.now();
 
     for (const change of payload.changes ?? []) {
+      if (!change || typeof change.path !== "string") {
+        continue;
+      }
       const path = normalizeVaultPath(change.path);
       if (!isMarkdownPath(path)) {
         rejected.push({ path, reason: "server_wins" });
@@ -240,14 +264,25 @@ export class SyncHttpsServer {
         let server: FileResponse | undefined;
         if (current && !current.deleted) {
           const file = this.app.vault.getAbstractFileByPath(path);
-          const content = file instanceof TFile ? await this.app.vault.read(file) : "";
-          server = {
-            path,
-            revision: current.revision,
-            contentHash: current.contentHash,
-            mtime: current.mtime,
-            content,
-          };
+          if (!(file instanceof TFile)) {
+            server = {
+              path,
+              revision: current.revision,
+              contentHash: "",
+              mtime: current.mtime,
+              content: "",
+              deleted: true,
+            };
+          } else {
+            const content = await this.app.vault.read(file);
+            server = {
+              path,
+              revision: current.revision,
+              contentHash: current.contentHash,
+              mtime: current.mtime,
+              content,
+            };
+          }
         } else {
           server = {
             path,
