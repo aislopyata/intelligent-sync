@@ -1,0 +1,11 @@
+{
+	"id": "intelligent-sync",
+	"name": "Intelligent Sync",
+	"version": "0.1.2",
+	"minAppVersion": "1.5.0",
+	"description": "Sync markdown notes between a Linux server vault and clients (including iPhone) over HTTPS with API key authentication.",
+	"author": "v_bykovskii",
+	"authorUrl": "",
+	"fundingUrl": "",
+	"isDesktopOnly": false
+}
